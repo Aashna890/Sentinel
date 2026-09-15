@@ -20,14 +20,35 @@ JWT_EXPIRES   = timedelta(days=30)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-# ── In-memory store (replace with a real database) ────────────────────────────
-DB: dict = {
-    "users":         {},  # email → user dict
-    "google_tokens": {},  # user_id → google access_token
-    "watches":       {},  # user_id → {historyId, expiration}
-    "cases":         {},  # case_id → case dict
-    "alerts":        {},  # alert_id → alert dict
-    "reset_tokens":  {},  # token_string → {email, expires}
+# ── Persistent SQLite store ───────────────────────────────────────────────────
+from services.database import db as _db
+
+# Legacy shim — existing routers that do DB["cases"][id] still work via the
+# DictProxy wrapper. New code should use `from services.database import db`.
+class _DictProxy:
+    """Makes db.cases behave like a plain dict for legacy callers."""
+    def __init__(self, table): self._t = table
+    def __getitem__(self, k):
+        v = self._t.get(k)
+        if v is None: raise KeyError(k)
+        return v
+    def __setitem__(self, k, v): self._t.set(k, v)
+    def __contains__(self, k):   return self._t.get(k) is not None
+    def get(self, k, default=None):
+        v = self._t.get(k)
+        return v if v is not None else default
+    def values(self): return self._t.all()
+    def items(self):
+        return [(r.get("id") or r.get("email") or r.get("user_id"), r)
+                for r in self._t.all()]
+
+DB = {
+    "users":         _DictProxy(_db.users),
+    "google_tokens": _DictProxy(_db.google_tokens),
+    "watches":       _DictProxy(_db.watches),
+    "cases":         _DictProxy(_db.cases),
+    "alerts":        _DictProxy(_db.alerts),
+    "reset_tokens":  _DictProxy(_db.reset_tokens),
 }
 
 

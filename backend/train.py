@@ -622,16 +622,107 @@ def train_anomaly_model(df: pd.DataFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    import json
+    from sklearn.metrics import (
+        classification_report, confusion_matrix, f1_score, accuracy_score
+    )
+
     print("=" * 60)
     print("Sentinel ML Training Pipeline")
     print("=" * 60)
 
     df = load_all_datasets()
-    train_nlp_model(df)
-    train_structured_model(df)
-    train_anomaly_model(df)
+    nlp_pipeline, le = train_nlp_model(df)
+    xgb_model        = train_structured_model(df)
+    iso_model        = train_anomaly_model(df)
 
-    print("\n[5/5] All models trained ✓")
+    # ── Save metrics.json for the dashboard ───────────────────────────────────
+    print("\n[5/5] Saving metrics.json...")
+
+    X_text = df["text"].fillna("").tolist()
+    y_enc  = le.transform(df["label"].tolist())
+    from sklearn.model_selection import train_test_split
+    _, X_test_txt, _, y_test_enc = train_test_split(
+        X_text, y_enc, test_size=0.2, random_state=42, stratify=y_enc
+    )
+    y_pred_nlp = nlp_pipeline.predict(X_test_txt)
+
+    X_struct = _build_matrix(df)
+    y_binary = (df["label"] != LABEL_LEGIT).astype(int).values
+    _, X_test_s, _, y_test_b = train_test_split(
+        X_struct, y_binary, test_size=0.2, random_state=42, stratify=y_binary
+    )
+    y_pred_xgb = xgb_model.predict(X_test_s)
+
+    nlp_report = classification_report(
+        y_test_enc, y_pred_nlp, target_names=le.classes_, output_dict=True
+    )
+    xgb_report = classification_report(
+        y_test_b, y_pred_xgb,
+        target_names=["legitimate", "threat"], output_dict=True
+    )
+    cm_nlp = confusion_matrix(y_test_enc, y_pred_nlp).tolist()
+    cm_xgb = confusion_matrix(y_test_b,   y_pred_xgb).tolist()
+
+    # Anomaly separation
+    scores_all   = iso_model.score_samples(X_struct)
+    legit_scores = scores_all[df["label"].values == LABEL_LEGIT]
+    threat_scores= scores_all[df["label"].values != LABEL_LEGIT]
+
+    feat_importances = sorted(
+        [{"feature": n, "importance": round(float(v), 4)}
+         for n, v in zip(STRUCTURED_FEATURE_NAMES, xgb_model.feature_importances_)],
+        key=lambda x: -x["importance"]
+    )
+
+    metrics = {
+        "trained_at":       __import__("datetime").datetime.utcnow().isoformat(),
+        "dataset_size":     int(len(df)),
+        "label_counts":     df["label"].value_counts().to_dict(),
+        "classes":          list(le.classes_),
+        "nlp_model": {
+            "type":         "TF-IDF + LinearSVC",
+            "accuracy":     round(nlp_report["accuracy"], 4),
+            "f1_weighted":  round(nlp_report["weighted avg"]["f1-score"], 4),
+            "per_class":    {k: {"precision": round(v["precision"],3),
+                                  "recall":    round(v["recall"],3),
+                                  "f1":        round(v["f1-score"],3),
+                                  "support":   int(v["support"])}
+                             for k, v in nlp_report.items()
+                             if k not in ("accuracy","macro avg","weighted avg")},
+            "confusion_matrix": cm_nlp,
+            "confusion_labels":  list(le.classes_),
+        },
+        "structured_model": {
+            "type":        "XGBoost (25 engineered features)",
+            "accuracy":    round(xgb_report["accuracy"], 4),
+            "f1_weighted": round(xgb_report["weighted avg"]["f1-score"], 4),
+            "precision":   round(xgb_report["threat"]["precision"], 4),
+            "recall":      round(xgb_report["threat"]["recall"], 4),
+            "confusion_matrix": cm_xgb,
+            "confusion_labels":  ["legitimate", "threat"],
+            "feature_importances": feat_importances[:15],
+        },
+        "anomaly_model": {
+            "type":              "Isolation Forest",
+            "legit_score_mean":  round(float(legit_scores.mean()), 4),
+            "threat_score_mean": round(float(threat_scores.mean()), 4),
+            "separation_gap":    round(float(legit_scores.mean() - threat_scores.mean()), 4),
+            "contamination":     0.05,
+        },
+        "ensemble_weights": {
+            "nlp":        0.40,
+            "structured": 0.35,
+            "anomaly":    0.15,
+            "header_bonus_max": 0.21,
+        },
+    }
+
+    metrics_path = MODEL_DIR / "metrics.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2))
+    print(f"  ✓ Saved metrics.json")
+
+    print("\nAll models trained ✓")
     print(f"  Saved to: {MODEL_DIR}")
     print("\nNext: restart uvicorn — models load automatically on startup.")
     print("=" * 60)

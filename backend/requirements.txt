@@ -29,3 +29,9 @@ joblib>=1.4.2
 # ── Explainability (comment out if install is slow) ───────────────────────────
 networkx>=3.3
 shap>=0.46.0
+# ── Persistent storage ────────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+
+# ── DNS / WHOIS enrichment ────────────────────────────────────────────────────
+dnspython>=2.6.0
+python-whois>=0.9.0

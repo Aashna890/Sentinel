@@ -49,6 +49,14 @@ async def analyze_and_save(
     analysis = await run_full_pipeline(raw_email, parsed)
     geo      = await geolocate(analysis.get("originating_ip", ""))
 
+    # DNS/WHOIS enrichment — runs in parallel with case save, non-blocking
+    sender_domain = parsed.get("sender_email", "").split("@")[-1] if "@" in parsed.get("sender_email", "") else ""
+    dns_intel = await enrich_domain_intel(sender_domain) if sender_domain else {}
+    # Merge DNS intel into domain_intel (ML model findings take priority)
+    base_domain_intel = analysis.get("domain_intel", {}) or {}
+    base_domain_intel.update({k: v for k, v in dns_intel.items() if k not in base_domain_intel or not base_domain_intel[k]})
+    analysis["domain_intel"] = base_domain_intel
+
     fraud_score = analysis.get("fraud_score", 0)
 
     # ── Save case ─────────────────────────────────────────────────────────────
@@ -398,3 +406,109 @@ def _get_or_create_label(service, severity: str) -> str:
         },
     ).execute()
     return created["id"]
+
+# ─── DNS / WHOIS enrichment ───────────────────────────────────────────────────
+
+async def enrich_domain_intel(domain: str) -> dict:
+    """
+    Enrich domain intelligence with live DNS and WHOIS data.
+    Non-blocking — failures return partial data gracefully.
+
+    Returns dict with:
+      mx_records   — list of MX hostnames
+      a_records    — list of A record IPs
+      has_spf      — bool (TXT record contains v=spf1)
+      has_dmarc    — bool (_dmarc TXT record exists)
+      domain_age_days — int or None (from WHOIS)
+      registrar    — str or None
+      created      — str or None
+      is_new_domain — bool (registered < 30 days ago)
+      whois_error  — str or None
+    """
+    import asyncio
+    result = {
+        "mx_records":     [],
+        "a_records":      [],
+        "has_spf":        False,
+        "has_dmarc":      False,
+        "domain_age_days": None,
+        "registrar":      None,
+        "created":        None,
+        "is_new_domain":  False,
+        "whois_error":    None,
+    }
+
+    if not domain:
+        return result
+
+    loop = asyncio.get_event_loop()
+
+    # ── MX records (via socket/DNS) ───────────────────────────────────────────
+    try:
+        import dns.resolver
+        mx_answers = dns.resolver.resolve(domain, "MX", lifetime=5)
+        result["mx_records"] = sorted(
+            [str(r.exchange).rstrip(".") for r in mx_answers],
+            key=lambda x: x
+        )
+    except Exception:
+        # dnspython not installed or DNS error — try stdlib
+        try:
+            mx = await loop.run_in_executor(None, socket.getaddrinfo, domain, None)
+            result["a_records"] = list({item[4][0] for item in mx})
+        except Exception:
+            pass
+
+    # ── A records ─────────────────────────────────────────────────────────────
+    try:
+        import dns.resolver
+        a_answers = dns.resolver.resolve(domain, "A", lifetime=5)
+        result["a_records"] = [str(r) for r in a_answers]
+    except Exception:
+        pass
+
+    # ── SPF TXT record ────────────────────────────────────────────────────────
+    try:
+        import dns.resolver
+        txt_answers = dns.resolver.resolve(domain, "TXT", lifetime=5)
+        for rdata in txt_answers:
+            txt = b"".join(rdata.strings).decode("utf-8", errors="ignore")
+            if "v=spf1" in txt.lower():
+                result["has_spf"] = True
+                break
+    except Exception:
+        pass
+
+    # ── DMARC record ─────────────────────────────────────────────────────────
+    try:
+        import dns.resolver
+        dmarc_answers = dns.resolver.resolve(f"_dmarc.{domain}", "TXT", lifetime=5)
+        result["has_dmarc"] = any(
+            "v=dmarc1" in b"".join(r.strings).decode("utf-8", errors="ignore").lower()
+            for r in dmarc_answers
+        )
+    except Exception:
+        pass
+
+    # ── WHOIS (domain age, registrar) ─────────────────────────────────────────
+    try:
+        import whois as _whois
+        def _do_whois():
+            return _whois.whois(domain)
+        w = await asyncio.wait_for(
+            loop.run_in_executor(None, _do_whois), timeout=8
+        )
+        if w:
+            created = w.creation_date
+            if isinstance(created, list):
+                created = created[0]
+            if created:
+                result["created"] = str(created)[:10]
+                age = (datetime.utcnow() - created).days if hasattr(created, "year") else None
+                result["domain_age_days"] = age
+                result["is_new_domain"]   = age is not None and age < 30
+            result["registrar"] = str(w.registrar or "")[:80] or None
+    except Exception as e:
+        result["whois_error"] = str(e)[:100]
+
+    return result
