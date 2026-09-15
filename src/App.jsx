@@ -8,26 +8,22 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import AppLayout from '@/components/AppLayout';
 
 // Pages
-import Landing from '@/pages/Landing';
-import Dashboard from '@/pages/Dashboard';
+import Landing      from '@/pages/Landing';
+import Dashboard    from '@/pages/Dashboard';
 import AnalyzeEmail from '@/pages/AnalyzeEmail';
-import Cases from '@/pages/Cases';
-import CaseDetail from '@/pages/CaseDetail';
-import Alerts from '@/pages/Alerts';
-import Login from '@/pages/Login';
-import Register from '@/pages/Register';
+import Cases        from '@/pages/Cases';
+import CaseDetail   from '@/pages/CaseDetail';
+import Alerts       from '@/pages/Alerts';
+import ModelMetrics from '@/pages/ModelMetrics';
+import Login        from '@/pages/Login';
+import Register     from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
-import ResetPassword from '@/pages/ResetPassword';
-import PageNotFound from '@/pages/PageNotFound';
+import ResetPassword  from '@/pages/ResetPassword';
+import PageNotFound   from '@/pages/PageNotFound';
 
-// Create the query client here — no Base44 singleton needed
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, staleTime: 30_000 },
-  },
+  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
-
-// ── Authenticated shell ───────────────────────────────────────────────────────
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -42,29 +38,27 @@ const AuthenticatedApp = () => {
 
   if (authError) {
     if (authError.type === 'user_not_registered') return <UserNotRegisteredError />;
-    if (authError.type === 'auth_required') {
-      navigateToLogin();
-      return null;
-    }
+    if (authError.type === 'auth_required') { navigateToLogin(); return null; }
   }
 
   return (
     <Routes>
-      {/* Public routes */}
-      <Route path="/"                  element={<Landing />} />
-      <Route path="/login"             element={<Login />} />
-      <Route path="/register"          element={<Register />} />
-      <Route path="/forgot-password"   element={<ForgotPassword />} />
-      <Route path="/reset-password"    element={<ResetPassword />} />
+      {/* Public */}
+      <Route path="/"                element={<Landing />} />
+      <Route path="/login"           element={<Login />} />
+      <Route path="/register"        element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password"  element={<ResetPassword />} />
 
-      {/* Protected routes */}
+      {/* Protected */}
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         <Route element={<AppLayout />}>
-          <Route path="/dashboard"     element={<Dashboard />} />
-          <Route path="/analyze"       element={<AnalyzeEmail />} />
-          <Route path="/cases"         element={<Cases />} />
-          <Route path="/cases/:id"     element={<CaseDetail />} />
-          <Route path="/alerts"        element={<Alerts />} />
+          <Route path="/dashboard"   element={<Dashboard />} />
+          <Route path="/analyze"     element={<AnalyzeEmail />} />
+          <Route path="/cases"       element={<Cases />} />
+          <Route path="/cases/:id"   element={<CaseDetail />} />
+          <Route path="/alerts"      element={<Alerts />} />
+          <Route path="/metrics"     element={<ModelMetrics />} />
         </Route>
       </Route>
 
@@ -72,8 +66,6 @@ const AuthenticatedApp = () => {
     </Routes>
   );
 };
-
-// ── Root ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
   return (

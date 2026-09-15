@@ -176,6 +176,10 @@ Respond ONLY with valid JSON in this exact shape:
    * @param {object} reportData
    * @returns {string}
    */
+  async getMetrics() {
+    return apiFetch('/metrics');
+  },
+
   async summariseReport(reportData) {
     const reportPrompt = `Summarise this email forensic report for a non-technical stakeholder in 3-4 sentences. 
 Highlight the key threat, confidence level, and recommended action.

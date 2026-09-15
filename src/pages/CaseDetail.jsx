@@ -8,12 +8,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import {
   ArrowLeft, Loader2, MapPin, Server, Globe, ShieldCheck,
-  FileWarning, AlertTriangle, Clock, Network,
+  FileWarning, AlertTriangle, Clock, Network, Brain, BarChart2,
+  GitBranch, Link2, Mail,
 } from 'lucide-react';
+import GraphView from '@/components/GraphView';
 
 // Colour per threat level — used for the badge and the fraud score number
 const LEVEL_COLOR = {
@@ -81,18 +83,29 @@ function Tag({ color, children }) {
 export default function CaseDetail() {
   // The case ID comes from the URL (/cases/:id)
   const { id } = useParams();
+  const navigate = useNavigate();
 
-  const [c, setC]             = useState(null);   // The full case object
-  const [loading, setLoading] = useState(true);   // True while fetching the case
-  const [updating, setUpdating] = useState(false); // True while saving a status change
+  const [c, setC]               = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [graphData, setGraphData]     = useState(null);
+  const [graphLoading, setGraphLoading] = useState(false);
 
   // Fetch the case by ID when the component mounts (or when the ID changes)
   useEffect(() => {
     (async () => {
       try {
-        setC(await api.entities.EmailCase.get(id));
+        const caseData = await api.entities.EmailCase.get(id);
+        setC(caseData);
+        // Fetch graph correlation in background
+        setGraphLoading(true);
+        try {
+          const gd = await api.functions.getGraphData(id);
+          setGraphData(gd);
+        } catch (_) {}
+        finally { setGraphLoading(false); }
       } catch {
-        setC(null); // Case not found — handled below
+        setC(null);
       } finally {
         setLoading(false);
       }
@@ -436,7 +449,215 @@ export default function CaseDetail() {
         </div>
       </div>
 
-      {/* Raw email source — collapsible scrollable block at the bottom */}
+      {/* ── ML Score Breakdown ─────────────────────────────────────────── */}
+      {c.ml_scores && Object.keys(c.ml_scores).length > 0 && (
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Brain className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-medium text-slate-200">ML Score Breakdown</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Three independent models combined with fixed weights to produce the final fraud score.
+          </p>
+          <div className="space-y-3">
+            {[
+              { label: 'NLP Classifier (TF-IDF + LinearSVC)',      key: 'nlp_score',        weight: '40%', color: 'bg-cyan-500' },
+              { label: 'Structured Model (XGBoost, 25 features)',  key: 'structured_score', weight: '35%', color: 'bg-violet-500' },
+              { label: 'Anomaly Detector (Isolation Forest)',       key: 'anomaly_score',    weight: '15%', color: 'bg-amber-500' },
+            ].map(({ label, key, weight, color }) => {
+              const val = c.ml_scores[key] ?? 0;
+              return (
+                <div key={key}>
+                  <div className="flex justify-between text-xs text-slate-400 mb-1">
+                    <span>{label}</span>
+                    <span className="font-mono">{val}/100 <span className="text-slate-600">({weight})</span></span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                    <div className={`h-full ${color}`} style={{ width: `${val}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+            {(c.ml_scores.header_bonus_pts ?? 0) > 0 && (
+              <div className="flex justify-between text-xs pt-2 border-t border-slate-800">
+                <span className="text-slate-400">Header forensics bonus</span>
+                <span className="text-red-400 font-mono">+{c.ml_scores.header_bonus_pts} pts</span>
+              </div>
+            )}
+            {c.ml_scores.nlp_label && (
+              <div className="flex justify-between text-xs pt-1">
+                <span className="text-slate-500">NLP model class prediction</span>
+                <span className={`font-medium capitalize ${
+                  c.ml_scores.nlp_label === 'legitimate'    ? 'text-emerald-400'
+                  : c.ml_scores.nlp_label === 'bec'         ? 'text-red-400'
+                  : c.ml_scores.nlp_label === 'phishing'    ? 'text-orange-400'
+                  : c.ml_scores.nlp_label === 'impersonation' ? 'text-purple-400'
+                  : 'text-amber-400'
+                }`}>{c.ml_scores.nlp_label}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── SHAP Explainability ─────────────────────────────────────────── */}
+      {c.shap_contributions?.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <BarChart2 className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-medium text-slate-200">Explainable AI — SHAP Feature Contributions</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            SHAP values explain why the XGBoost model gave this score.
+            Red bars push toward threat; green bars push toward legitimate.
+          </p>
+          <div className="space-y-2.5">
+            {c.shap_contributions.map((s, i) => {
+              const isPos  = s.direction === '+';
+              const barPct = Math.min(Math.abs(s.contribution) * 600, 100);
+              return (
+                <div key={i}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-300 capitalize">{s.feature.replace(/_/g, ' ')}</span>
+                    <span className={`font-mono ${isPos ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {isPos ? '+' : ''}{s.contribution.toFixed(3)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className={`h-full ${isPos ? 'bg-red-500' : 'bg-emerald-500'}`}
+                         style={{ width: `${barPct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Graph Correlation ───────────────────────────────────────────── */}
+      <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Network className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-sm font-medium text-slate-200">Graph Correlation</h3>
+        </div>
+
+        {graphLoading ? (
+          <div className="flex items-center gap-2 text-sm text-slate-400 py-4">
+            <Loader2 className="w-4 h-4 animate-spin text-cyan-400" /> Correlating…
+          </div>
+        ) : graphData ? (
+          <div className="space-y-5">
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { label: 'Related Cases',   value: graphData.correlation?.related_count ?? 0 },
+                { label: 'Graph Nodes',     value: graphData.stats?.total_nodes ?? 0 },
+                { label: 'Campaigns',       value: graphData.campaigns?.length ?? 0 },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-lg bg-slate-950/60 p-3 text-center">
+                  <div className="text-xl font-semibold text-cyan-400">{value}</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Node/edge visual diagram */}
+            {graphData.nodes?.length > 0 && (
+              <div>
+                <p className="text-xs text-slate-500 mb-2">
+                  Node types: ✉ Email · 🌐 Domain · ⚡ IP · 🔗 URL &nbsp;|&nbsp;
+                  Drag nodes to rearrange. Click to inspect.
+                </p>
+                <GraphView nodes={graphData.nodes} edges={graphData.edges} />
+              </div>
+            )}
+
+            {/* Campaigns */}
+            {graphData.campaigns?.length > 0 && (
+              <div className="pt-3 border-t border-slate-800">
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Mail className="w-3 h-3 text-amber-400" /> Campaign detected (DBSCAN clustering)
+                </div>
+                {graphData.campaigns.map(camp => (
+                  <div key={camp.campaign_id}
+                       className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 text-xs space-y-1 mb-2">
+                    <div className="text-amber-300 font-medium">{camp.label}</div>
+                    <div className="text-slate-400">
+                      {camp.size} emails · avg score: {camp.avg_fraud_score} · max: {camp.max_fraud_score}
+                    </div>
+                    {camp.shared_ips.length > 0 && (
+                      <div className="text-slate-500 font-mono">IPs: {camp.shared_ips.join(', ')}</div>
+                    )}
+                    {camp.shared_domains.length > 0 && (
+                      <div className="text-slate-500">Domains: {camp.shared_domains.join(', ')}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Related by IP */}
+            {graphData.correlation?.related_by_ip?.length > 0 && (
+              <div className="pt-3 border-t border-slate-800">
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Link2 className="w-3 h-3 text-red-400" /> Related by shared originating IP
+                </div>
+                <div className="space-y-1.5">
+                  {graphData.correlation.related_by_ip.slice(0, 5).map(r => (
+                    <div key={r.id}
+                         onClick={() => navigate(`/cases/${r.id}`)}
+                         className="flex items-center justify-between rounded-lg bg-slate-950/50 px-3 py-2 cursor-pointer hover:bg-slate-800/60 transition">
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-300 truncate">{r.subject || '(no subject)'}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{r.value}</div>
+                      </div>
+                      <span className="text-xs font-semibold ml-3 shrink-0"
+                            style={{ color: r.fraud_score >= 70 ? '#ef4444' : r.fraud_score >= 40 ? '#eab308' : '#22c55e' }}>
+                        {r.fraud_score}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Related by domain */}
+            {graphData.correlation?.related_by_domain?.length > 0 && (
+              <div className="pt-3 border-t border-slate-800">
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <GitBranch className="w-3 h-3 text-purple-400" /> Related by sender domain
+                </div>
+                <div className="space-y-1.5">
+                  {graphData.correlation.related_by_domain.slice(0, 5).map(r => (
+                    <div key={r.id}
+                         onClick={() => navigate(`/cases/${r.id}`)}
+                         className="flex items-center justify-between rounded-lg bg-slate-950/50 px-3 py-2 cursor-pointer hover:bg-slate-800/60 transition">
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-300 truncate">{r.subject || '(no subject)'}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{r.value}</div>
+                      </div>
+                      <span className="text-xs font-semibold ml-3 shrink-0"
+                            style={{ color: r.fraud_score >= 70 ? '#ef4444' : r.fraud_score >= 40 ? '#eab308' : '#22c55e' }}>
+                        {r.fraud_score}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {graphData.correlation?.related_count === 0 && graphData.campaigns?.length === 0 && (
+              <p className="text-sm text-slate-500">
+                No correlations found yet — graph improves as more emails are analysed.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Graph data unavailable.</p>
+        )}
+      </div>
+
+      {/* Raw email source */}
       {c.raw_email && (
         <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/50 p-5">
           <h3 className="text-sm font-medium text-slate-200 mb-3">Raw Email Source</h3>
