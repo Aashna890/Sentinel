@@ -391,7 +391,8 @@ def _parse_relay_path(parsed: dict) -> list[dict]:
     received = parsed.get("received_headers", []) or []
     hops = []
     for i, header in enumerate(received):
-        ip_match   = re.search(r"\[(\d+\.\d+\.\d+\.\d+)\]", header)
+        # Match IPs in [brackets] or (parentheses)
+        ip_match   = re.search(r"[\[\(](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\]\)]", header)
         from_match = re.search(r"from\s+([\w.\-]+)", header, re.IGNORECASE)
         by_match   = re.search(r"by\s+([\w.\-]+)", header, re.IGNORECASE)
         ts_match   = re.search(r";\s*(.+)$", header)
@@ -406,15 +407,21 @@ def _parse_relay_path(parsed: dict) -> list[dict]:
 
 
 def _extract_originating_ip(parsed: dict) -> str:
-    """Extract the first untrusted external IP from Received headers."""
+    """Extract the first untrusted external IP from Received headers.
+    Handles both [brackets] and (parentheses) formats used by different MTAs.
+    """
     received = parsed.get("received_headers", []) or []
     PRIVATE = re.compile(
         r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|::1)"
     )
-    for header in reversed(received):  # oldest hop first
-        m = re.search(r"\[(\d+\.\d+\.\d+\.\d+)\]", header)
-        if m and not PRIVATE.match(m.group(1)):
-            return m.group(1)
+    # Match IPs in either [x.x.x.x] or (x.x.x.x) format
+    IP_PATTERN = re.compile(r"[\[\(](\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[\]\)]")
+
+    for header in reversed(received):  # oldest hop = most external = first
+        for m in IP_PATTERN.finditer(header):
+            ip = m.group(1)
+            if not PRIVATE.match(ip):
+                return ip
     return ""
 
 

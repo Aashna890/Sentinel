@@ -10,7 +10,6 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/apiClient';
 import {
   ShieldAlert, Gauge, BellRing, ArrowRight, ScanSearch, FolderSearch,
-  Brain, Network,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
@@ -49,11 +48,11 @@ function StatCard({ icon: Icon, label, value, accent }) {
 // ── Main page component ───────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [cases, setCases]         = useState([]);
-  const [alerts, setAlerts]       = useState([]);
-  const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading]     = useState(true);
+  const [cases, setCases]     = useState([]);
+  const [alerts, setAlerts]   = useState([]);
+  const [loading, setLoading] = useState(true);
 
+  // Fetch cases and alerts in parallel on mount to minimise load time
   useEffect(() => {
     (async () => {
       try {
@@ -63,11 +62,6 @@ export default function Dashboard() {
         ]);
         setCases(caseList   || []);
         setAlerts(alertList || []);
-        // Fetch campaigns non-critically
-        try {
-          const camp = await api.functions.getAllCampaigns();
-          setCampaigns(camp.campaigns || []);
-        } catch (_) {}
       } finally {
         setLoading(false);
       }
@@ -107,29 +101,41 @@ export default function Dashboard() {
             Real-time email threat detection & forensic intelligence
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link
-            to="/metrics"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-medium transition"
-          >
-            <Brain className="w-4 h-4" /> Model Metrics
-          </Link>
-          <Link
-            to="/analyze"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-medium transition"
-          >
-            <ScanSearch className="w-4 h-4" /> Analyze Email
-          </Link>
-        </div>
+        {/* Quick link to the analysis page */}
+        <Link
+          to="/analyze"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-sm font-medium transition"
+        >
+          <ScanSearch className="w-4 h-4" /> Analyze Email
+        </Link>
       </div>
 
       {/* ── KPI cards row ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <StatCard icon={FolderSearch} label="Total Cases"    value={cases.length}     accent="bg-blue-500/15 text-blue-400" />
-        <StatCard icon={ShieldAlert}  label="High Risk"      value={cases.filter(c => (c.fraud_score||0)>=70).length} accent="bg-red-500/15 text-red-400" />
-        <StatCard icon={Gauge}        label="Avg Fraud Score" value={cases.length ? Math.round(cases.reduce((s,c)=>s+(c.fraud_score||0),0)/cases.length) : 0} accent="bg-amber-500/15 text-amber-400" />
-        <StatCard icon={BellRing}     label="Active Alerts"  value={alerts.filter(a=>!a.acknowledged).length} accent="bg-cyan-500/15 text-cyan-400" />
-        <StatCard icon={Network}      label="Campaigns"      value={campaigns.length} accent="bg-purple-500/15 text-purple-400" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <StatCard
+          icon={FolderSearch}
+          label="Total Cases"
+          value={cases.length}
+          accent="bg-blue-500/15 text-blue-400"
+        />
+        <StatCard
+          icon={ShieldAlert}
+          label="High Risk"
+          value={highRisk}
+          accent="bg-red-500/15 text-red-400"
+        />
+        <StatCard
+          icon={Gauge}
+          label="Avg Fraud Score"
+          value={avgScore}
+          accent="bg-amber-500/15 text-amber-400"
+        />
+        <StatCard
+          icon={BellRing}
+          label="Active Alerts"
+          value={unacknowledged}
+          accent="bg-cyan-500/15 text-cyan-400"
+        />
       </div>
 
       {/* ── Main content row: recent cases + threat distribution ─────────── */}
@@ -217,6 +223,7 @@ export default function Dashboard() {
                     innerRadius={50}
                     outerRadius={80}
                     paddingAngle={3}
+                    isAnimationActive={false}
                   >
                     {distribution.map((d, i) => (
                       <Cell key={i} fill={d.color} />
