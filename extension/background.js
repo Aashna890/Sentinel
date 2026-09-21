@@ -28,7 +28,7 @@ export async function signInWithGoogle() {
 
       try {
         // Exchange the Google token for a Sentinel JWT
-        const res = await fetch(`${API_BASE}/auth/google`, {
+        const res = await fetch(`${API_BASE}/api/auth/google`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ google_token: googleToken }),

@@ -10,19 +10,21 @@ export default function CTASection() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
         transition={{ duration: 0.6 }}
-        className="max-w-5xl mx-auto relative overflow-hidden rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/40 p-10 md:p-16 text-center"
+        className="max-w-5xl mx-auto relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-900/60 backdrop-blur p-10 md:p-16 text-center"
       >
-        <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-[30rem] h-[30rem] bg-cyan-500/20 rounded-full blur-[120px]" />
+        <img src="https://images.unsplash.com/photo-1614064548567-61a9e0c7b3e2?auto=format&fit=crop&w=1200&q=80" alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-slate-950/60" />
+        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] bg-cyan-500/20 rounded-full blur-[130px]" />
         <div className="relative">
-          <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Stop the attack. Trace the actor.</h2>
-          <p className="mt-4 text-slate-400 max-w-xl mx-auto">
+          <h2 className="text-4xl md:text-5xl font-semibold tracking-tight">Stop the attack. <span className="bg-gradient-to-r from-cyan-300 to-fuchsia-400 bg-clip-text text-transparent">Trace the actor.</span></h2>
+          <p className="mt-5 text-slate-300 max-w-xl mx-auto text-lg">
             Bring forensic-grade email threat intelligence to your security team today. No infrastructure to deploy.
           </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link to="/register" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium transition shadow-lg shadow-cyan-500/25 hover:-translate-y-0.5">
-              Create your account <ArrowRight className="w-4 h-4" />
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+            <Link to="/register" className="group inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-semibold transition shadow-xl shadow-cyan-500/25 hover:-translate-y-0.5">
+              Create your account <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition" />
             </Link>
-            <Link to="/login" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-slate-700 hover:border-slate-500 text-slate-200 font-medium transition">
+            <Link to="/login" className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl border border-white/15 hover:border-white/30 bg-white/5 hover:bg-white/10 text-slate-100 font-medium transition backdrop-blur">
               Sign in
             </Link>
           </div>
