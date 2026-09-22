@@ -6,7 +6,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from '@/components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AppLayout from '@/components/AppLayout';
-
+import OAuthCallback  from '@/pages/OAuthCallback';
 // Pages
 import Landing      from '@/pages/Landing';
 import Dashboard    from '@/pages/Dashboard';
@@ -49,7 +49,7 @@ const AuthenticatedApp = () => {
       <Route path="/register"        element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password"  element={<ResetPassword />} />
-
+      <Route path="/auth/callback"  element={<OAuthCallback />} />  {/* ← ADD THIS */}
       {/* Protected */}
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         <Route element={<AppLayout />}>

@@ -16,8 +16,7 @@
   },
 
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
 
   "content_scripts": [
@@ -34,18 +33,20 @@
     "storage",
     "alarms",
     "notifications",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
 
   "host_permissions": [
     "https://mail.google.com/*",
     "https://www.googleapis.com/*",
     "https://gmail.googleapis.com/*",
-    "http://localhost:8000/*"
+    "http://localhost:8000/*",
+    "https://localhost:8000/*"
   ],
 
   "oauth2": {
-    "client_id": "${OAUTH_CLIENT_ID}",
+    "client_id": "857034958455-fmboilbtvos840o7sn1jcpasah1h6fme.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.labels",

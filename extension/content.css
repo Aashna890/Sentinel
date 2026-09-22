@@ -1,20 +1,44 @@
-/* Sentinel content-script styles — injected into mail.google.com */
+/* ─────────────────────────────────────────────────────────────────────────────
+   content.css  —  Sentinel threat banner styles
+   Injected into https://mail.google.com/* by the extension.
+   All rules are namespaced under .sentinel-* to avoid colliding with Gmail CSS.
+   ───────────────────────────────────────────────────────────────────────────── */
 
-.sentinel-banner {
-  width: 100%;
-  box-sizing: border-box;
-}
-
+.sentinel-banner,
 .sentinel-banner * {
   box-sizing: border-box;
 }
 
-/* Smooth appear */
-.sentinel-banner-inner {
-  animation: sentinel-fadein 0.25s ease;
+.sentinel-banner {
+  width: 100%;
+  display: block;
+  /* Ensure the banner sits above Gmail's own elements */
+  position: relative;
+  z-index: 1;
 }
 
-@keyframes sentinel-fadein {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+/* Smooth slide-in animation */
+.sentinel-banner-inner {
+  animation: sentinel-slidein 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes sentinel-slidein {
+  from {
+    opacity:   0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity:   1;
+    transform: translateY(0);
+  }
+}
+
+/* Dismiss button hover */
+.sentinel-banner .sentinel-dismiss:hover {
+  opacity: 1 !important;
+}
+
+/* Make the "View forensic report" link behave on hover */
+.sentinel-banner a:hover {
+  opacity: 0.85;
 }

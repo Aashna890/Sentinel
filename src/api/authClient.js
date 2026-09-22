@@ -1,12 +1,14 @@
-// authClient.js — fixed redirectToLogin to prevent infinite returnTo encoding
+// authClient.js — Sentinel Frontend Auth Client
 
-const TOKEN_KEY = 'sentinel_access_token';
-const API_BASE  = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const TOKEN_KEY  = 'sentinel_access_token';
+const API_BASE   = import.meta.env.VITE_API_BASE_URL ?? '/api';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8000';
 
-export function getAccessToken()       { return localStorage.getItem(TOKEN_KEY) ?? null; }
-export function setAccessToken(token)  { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); }
-export function clearAccessToken()     { localStorage.removeItem(TOKEN_KEY); }
+export function getAccessToken()      { return localStorage.getItem(TOKEN_KEY) ?? null; }
+export function setAccessToken(token) { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); }
+export function clearAccessToken()    { localStorage.removeItem(TOKEN_KEY); }
 
+// ── Internal fetch — path should NOT include /api prefix (API_BASE has it) ──
 async function apiFetch(path, options = {}) {
   const token = getAccessToken();
   const headers = {
@@ -33,7 +35,7 @@ async function apiFetch(path, options = {}) {
 export const auth = {
 
   async login({ email, password }) {
-    const data = await apiFetch('/auth/login', {
+    const data = await apiFetch('/auth/login', {       // ← no /api prefix
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -42,7 +44,7 @@ export const auth = {
   },
 
   async register({ email, password, full_name = '' }) {
-    const data = await apiFetch('/auth/register', {
+    const data = await apiFetch('/auth/register', {    // ← no /api prefix
       method: 'POST',
       body: JSON.stringify({ email, password, full_name }),
     });
@@ -50,28 +52,12 @@ export const auth = {
     return data;
   },
 
-  async verifyOtp({ email, otpCode }) {
-    const data = await apiFetch('/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email, otp: otpCode }),
-    });
-    if (data?.token) setAccessToken(data.token);
-    return data;
-  },
-
-  async resendOtp(email) {
-    return apiFetch('/auth/resend-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-  },
-
+  // Google OAuth — must go directly to backend (not through Vite proxy)
+  // because it's a browser redirect, not a fetch() call
   loginWithProvider(provider, returnTo = '/dashboard') {
-    const base = API_BASE.startsWith('http')
-      ? new URL(`/auth/${provider}`, API_BASE)
-      : new URL(`${API_BASE}/auth/${provider}`, window.location.origin);
-    if (returnTo) base.searchParams.set('returnTo', returnTo);
-    window.location.href = base.toString();
+    const url = new URL(`/api/auth/${provider}/redirect`, BACKEND_URL);
+    if (returnTo) url.searchParams.set('returnTo', returnTo);
+    window.location.href = url.toString();
   },
 
   startGoogleOAuth(returnTo = '/dashboard') {
@@ -101,17 +87,17 @@ export const auth = {
 
   setToken(token) { setAccessToken(token); },
 
-  async me() { return apiFetch('/auth/me'); },
+  async me() { return apiFetch('/auth/me'); },           // ← no /api prefix
 
   async forgotPassword({ email }) {
-    return apiFetch('/auth/forgot-password', {
+    return apiFetch('/auth/forgot-password', {           // ← no /api prefix
       method: 'POST',
       body: JSON.stringify({ email }),
     });
   },
 
   async resetPassword({ token, password }) {
-    return apiFetch('/auth/reset-password', {
+    return apiFetch('/auth/reset-password', {            // ← no /api prefix
       method: 'POST',
       body: JSON.stringify({ token, password }),
     });
@@ -122,25 +108,15 @@ export const auth = {
     if (redirectTo) window.location.href = redirectTo;
   },
 
-  /**
-   * Redirect to /login with a safe returnTo param.
-   * Strips any existing returnTo from the current URL first so
-   * the param never gets double-encoded (which caused HTTP 431).
-   */
   redirectToLogin(returnTo) {
     if (!returnTo) {
-      // Strip returnTo from the current URL to avoid re-encoding it
       const current = new URL(window.location.href);
       current.searchParams.delete('returnTo');
-      // If already on /login, go to /dashboard after auth — not /login again
       returnTo = current.pathname === '/login'
         ? '/dashboard'
         : current.pathname + current.search;
     }
-
-    // Hard-stop: never use a login URL as the returnTo destination
     if (returnTo.includes('/login')) returnTo = '/dashboard';
-
     const loginUrl = new URL('/login', window.location.origin);
     loginUrl.searchParams.set('returnTo', returnTo);
     window.location.href = loginUrl.toString();
@@ -149,7 +125,7 @@ export const auth = {
 
 export const app = {
   async getPublicSettings() {
-    return apiFetch('/app/public-settings');
+    return apiFetch('/app/public-settings');             // ← no /api prefix
   },
 };
 
