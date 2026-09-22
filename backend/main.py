@@ -10,16 +10,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import auth, gmail, analyze, cases, alerts, app_settings, graph, metrics
+from routers.scan import router as scan_router
 
 app = FastAPI(title="Sentinel Email Forensics API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "chrome-extension://*",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -32,6 +30,7 @@ app.include_router(alerts.router,       prefix="/api/alerts",  tags=["Alerts"])
 app.include_router(app_settings.router, prefix="/api/app",     tags=["App"])
 app.include_router(graph.router,        prefix="/api/graph",   tags=["Graph"])
 app.include_router(metrics.router,      prefix="/api/metrics", tags=["Metrics"])
+app.include_router(scan_router)
 
 @app.get("/health")
 def health():

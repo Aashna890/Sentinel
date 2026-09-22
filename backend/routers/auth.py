@@ -1,37 +1,46 @@
 """
 Auth router
 -----------
-POST /auth/google          — Exchange a Google access token for a Sentinel JWT
-POST /auth/login           — Email/password sign-in (fallback)
-POST /auth/register        — Email/password registration
-POST /auth/forgot-password — Send password reset email
-POST /auth/reset-password  — Complete password reset
-GET  /auth/me              — Return the authenticated user
+POST /auth/google             — Chrome extension: exchange Google token for Sentinel JWT
+GET  /auth/google/redirect    — Web app: redirect to Google consent screen
+GET  /auth/google/callback    — Web app: handle Google OAuth callback
+POST /auth/login              — Email/password sign-in
+POST /auth/register           — Email/password registration
+POST /auth/forgot-password    — Send password reset email
+POST /auth/reset-password     — Complete password reset
+GET  /auth/me                 — Return the authenticated user
 """
 
 import os
-import json
 import uuid
+import httpx
+from urllib.parse import urlencode
 from datetime import datetime, timedelta
 
-import httpx
-import jwt
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from services.auth_service import (
     create_jwt, decode_jwt, get_current_user,
     hash_password, verify_password,
-    DB,          # simple in-memory dict — replace with your DB
+    DB,
 )
 
 router = APIRouter()
 
-GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-JWT_SECRET          = os.environ.get("JWT_SECRET", "change-me-in-production")
+# ── Google OAuth config ───────────────────────────────────────────────────────
+GOOGLE_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v3/userinfo"
+GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+BACKEND_URL          = os.environ.get("BACKEND_URL",  "http://localhost:8000")
+FRONTEND_URL         = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+JWT_SECRET           = os.environ.get("JWT_SECRET", "change-me-in-production")
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
+# ── Pydantic models ───────────────────────────────────────────────────────────
 
 class GoogleTokenRequest(BaseModel):
     google_token: str
@@ -53,15 +62,14 @@ class ResetPasswordRequest(BaseModel):
     password: str
 
 
-# ── Google OAuth2 ─────────────────────────────────────────────────────────────
+# ── Chrome Extension: exchange Google token for Sentinel JWT ──────────────────
 
 @router.post("/google")
 async def google_auth(body: GoogleTokenRequest):
     """
-    Accepts the Google OAuth access token that the Chrome extension
-    obtained via chrome.identity.getAuthToken(), fetches the user's
-    profile from Google, upserts a local user record, and returns a
-    Sentinel JWT.
+    Used by the Chrome extension only.
+    Accepts the Google OAuth access token from chrome.identity.getAuthToken(),
+    fetches user profile from Google, upserts user, returns Sentinel JWT.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.get(
@@ -77,24 +85,85 @@ async def google_auth(body: GoogleTokenRequest):
     if not email:
         raise HTTPException(status_code=400, detail="No email in Google profile")
 
-    # Upsert user in DB
     user = DB["users"].get(email)
     if not user:
         user = {
-            "id":        str(uuid.uuid4()),
-            "email":     email,
-            "full_name": profile.get("name", ""),
-            "avatar":    profile.get("picture", ""),
-            "provider":  "google",
+            "id":         str(uuid.uuid4()),
+            "email":      email,
+            "full_name":  profile.get("name", ""),
+            "avatar":     profile.get("picture", ""),
+            "provider":   "google",
             "created_at": datetime.utcnow().isoformat(),
         }
         DB["users"][email] = user
 
-    # Store their Google token so the backend can call Gmail API on their behalf
+    # Store Google token so backend can call Gmail API on their behalf
     DB["google_tokens"][user["id"]] = body.google_token
 
     token = create_jwt(user)
-    return {"token": token, "user": user}
+    return {"token": token, "user": _safe(user)}
+
+
+# ── Web App: Google OAuth redirect flow ───────────────────────────────────────
+
+@router.get("/google/redirect")
+def google_redirect(returnTo: str = "/dashboard"):
+    """Step 1 — redirect browser to Google consent screen."""
+    params = {
+        "client_id":     GOOGLE_CLIENT_ID,
+        "redirect_uri":  f"{BACKEND_URL}/api/auth/google/callback",
+        "response_type": "code",
+        "scope":         "openid email profile",
+        "access_type":   "offline",
+        "state":         returnTo,
+    }
+    return RedirectResponse(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
+
+
+@router.get("/google/callback")
+async def google_callback(code: str, state: str = "/dashboard"):
+    """Step 2 — Google redirects here with auth code; exchange for JWT."""
+    async with httpx.AsyncClient() as client:
+        token_res = await client.post(GOOGLE_TOKEN_URL, data={
+            "code":          code,
+            "client_id":     GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri":  f"{BACKEND_URL}/api/auth/google/callback",
+            "grant_type":    "authorization_code",
+        })
+        tokens = token_res.json()
+
+        if "access_token" not in tokens:
+            print(f"[Sentinel] Google token error: {tokens}")
+            raise HTTPException(status_code=400, detail="Google token exchange failed")
+
+        profile_res = await client.get(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        profile = profile_res.json()
+
+    email = profile.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="No email in Google profile")
+
+    user = DB["users"].get(email)
+    if not user:
+        user = {
+            "id":         str(uuid.uuid4()),
+            "email":      email,
+            "full_name":  profile.get("name", ""),
+            "avatar":     profile.get("picture", ""),
+            "provider":   "google",
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        DB["users"][email] = user
+
+    token = create_jwt(user)
+    # Redirect to OAuthCallback.jsx which stores the token
+    return RedirectResponse(
+        f"{FRONTEND_URL}/auth/callback?token={token}&returnTo={state}"
+    )
 
 
 # ── Email / password ──────────────────────────────────────────────────────────
@@ -109,7 +178,7 @@ async def login(body: LoginRequest):
 
 @router.post("/register")
 async def register(body: RegisterRequest):
-    if body.email in DB["users"]:
+    if DB["users"].get(body.email):
         raise HTTPException(status_code=409, detail="Email already registered")
     user = {
         "id":              str(uuid.uuid4()),
@@ -125,15 +194,14 @@ async def register(body: RegisterRequest):
 
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest):
-    # Always return 200 to avoid email enumeration
     user = DB["users"].get(body.email)
     if user:
         reset_token = str(uuid.uuid4())
         DB["reset_tokens"][reset_token] = {
-            "email":    body.email,
-            "expires":  (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+            "email":   body.email,
+            "expires": (datetime.utcnow() + timedelta(hours=1)).isoformat(),
         }
-        # TODO: send reset_token via email (use SendGrid, SES, etc.)
+        # TODO: send email via SendGrid / SES
         print(f"[DEV] Password reset token for {body.email}: {reset_token}")
     return {"message": "If that email exists, a reset link was sent."}
 
@@ -151,15 +219,19 @@ async def reset_password(body: ResetPasswordRequest):
         raise HTTPException(status_code=404, detail="User not found")
 
     user["hashed_password"] = hash_password(body.password)
-    DB["reset_tokens"].pop(body.token)
+    DB["reset_tokens"].delete(body.token)
     return {"message": "Password updated"}
 
+
+# ── Current user ──────────────────────────────────────────────────────────────
 
 @router.get("/me")
 async def me(user=Depends(get_current_user)):
     return _safe(user)
 
 
+# ── Helper ────────────────────────────────────────────────────────────────────
+
 def _safe(user: dict) -> dict:
-    """Strip the hashed password before returning a user object."""
+    """Strip hashed_password before returning user object."""
     return {k: v for k, v in user.items() if k != "hashed_password"}
