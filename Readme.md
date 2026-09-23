@@ -575,16 +575,4 @@ http://localhost:8000/api/auth/google/callback
 
 ---
 
-## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-<div align="center">
-
-**Sentinel** — Built for institutional email security, fraud investigation, and cyber incident response.
-
-Made with ❤️ by [Aashna890](https://github.com/Aashna890)
-
-</div>
