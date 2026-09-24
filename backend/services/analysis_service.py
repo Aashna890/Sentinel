@@ -17,6 +17,7 @@ import os
 import re
 import json
 import uuid
+import asyncio
 import email as email_lib
 from datetime import datetime
 from email import policy
@@ -26,13 +27,14 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 from services.auth_service import DB
+from services.geo_service import enrich_ip                    # ← new
+from services.domain_intel_service import enrich_domain       # ← new
 
 # ── Gemini config (summary only) ──────────────────────────────────────────────
 def _gemini_key() -> str:
     return os.environ.get("VITE_GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
 
 GEMINI_MODEL     = "gemini-3.5-flash"
-IPAPI_URL        = "http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,as,asname,proxy,hosting,mobile,lat,lon,query"
 GMAIL_LABEL_NAME = "⚠️ SENTINEL THREAT"
 
 
@@ -47,7 +49,33 @@ async def analyze_and_save(
 
     parsed   = parse_email(raw_email)
     analysis = await run_full_pipeline(raw_email, parsed)
-    geo      = await geolocate(analysis.get("originating_ip", ""))
+
+    # ── Real IP geolocation (3-provider chain + TOR detection) ───────────────
+    geo = await enrich_ip(analysis.get("originating_ip", ""))
+
+    # ── Full WHOIS + DNS domain intelligence (blocking → thread pool) ─────────
+    sender_domain = (analysis.get("domain_intel") or {}).get("sender_domain", "")
+    if not sender_domain:
+        # Fallback: extract domain from sender email
+        sender_email = parsed.get("sender_email", "")
+        if "@" in sender_email:
+            sender_domain = sender_email.split("@", 1)[1].lower()
+
+    if sender_domain:
+        loop         = asyncio.get_event_loop()
+        domain_intel = await loop.run_in_executor(None, enrich_domain, sender_domain)
+        # Merge lookalike fields already computed by ml_models._build_domain_intel
+        ml_di = analysis.get("domain_intel") or {}
+        domain_intel["lookalike_risk"]  = ml_di.get("lookalike_risk")
+        domain_intel["lookalike_score"] = ml_di.get("lookalike_score")
+        domain_intel["display_name"]    = ml_di.get("display_name")
+        domain_intel["reply_to_domain"] = ml_di.get("reply_to_domain")
+        # Append any ML notes to the risk notes
+        ml_notes = ml_di.get("notes") or ""
+        if ml_notes and ml_notes not in (domain_intel.get("notes") or ""):
+            existing = domain_intel.get("notes") or ""
+            domain_intel["notes"] = f"{existing}; {ml_notes}".strip("; ")
+        analysis["domain_intel"] = domain_intel
 
     fraud_score = analysis.get("fraud_score", 0)
 
@@ -334,34 +362,8 @@ def _fallback_analysis(parsed: dict) -> dict:
 
 
 # ─── IP Geolocation ───────────────────────────────────────────────────────────
-
-async def geolocate(ip: str) -> dict:
-    if not ip or ip in ("127.0.0.1", "::1", ""):
-        return {}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(IPAPI_URL.format(ip=ip))
-        data = r.json()
-        if data.get("status") != "success":
-            return {}
-        return {
-            "ip":         data.get("query"),
-            "country":    data.get("country"),
-            "region":     data.get("regionName"),
-            "city":       data.get("city"),
-            "lat":        data.get("lat"),
-            "lon":        data.get("lon"),
-            "isp":        data.get("isp"),
-            "org":        data.get("org"),
-            "asn":        data.get("as"),
-            "asname":     data.get("asname"),
-            "is_proxy":   data.get("proxy", False),
-            "is_hosting": data.get("hosting", False),
-            "is_mobile":  data.get("mobile", False),
-        }
-    except Exception as exc:
-        print(f"[Sentinel] Geolocate failed for {ip}: {exc}")
-        return {}
+# Moved to services/geo_service.py  →  enrich_ip(ip)
+# Imported at the top of this file.
 
 
 # ─── Gmail label ──────────────────────────────────────────────────────────────

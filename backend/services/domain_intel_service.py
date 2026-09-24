@@ -76,52 +76,37 @@ _BRAND_DOMAINS = {
 # WHOIS lookup
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _run_whois(domain: str) -> dict:
-    """
-    Run a WHOIS lookup and return normalised data.
-    Returns {} on any error so the rest of the pipeline is unaffected.
-    """
-    if not _WHOIS_OK:
-        return {"whois_error": "python-whois not installed"}
+_WHOIS_TIMEOUT = 8   # seconds — Windows-safe (no SIGALRM), uses threading
 
-    try:
-        w = _whois.whois(domain)
-    except Exception as exc:
-        return {"whois_error": str(exc)[:120]}
 
-    if not w or not w.domain_name:
-        return {"whois_error": "No WHOIS record found"}
-
-    # Normalise creation/expiry dates — python-whois can return a list or single value
-    def _first_date(val) -> Optional[datetime]:
-        if val is None:
-            return None
-        if isinstance(val, list):
-            val = val[0]
-        if isinstance(val, datetime):
-            # Make timezone-aware if naive
-            if val.tzinfo is None:
-                val = val.replace(tzinfo=timezone.utc)
-            return val
+def _first_date(val) -> Optional[datetime]:
+    """Normalise python-whois date fields — may be list or single value."""
+    if val is None:
         return None
+    if isinstance(val, list):
+        val = val[0]
+    if isinstance(val, datetime):
+        if val.tzinfo is None:
+            val = val.replace(tzinfo=timezone.utc)
+        return val
+    return None
 
+
+def _parse_whois_result(w) -> dict:
+    """Extract and normalise fields from a python-whois result object."""
     created = _first_date(w.creation_date)
     expiry  = _first_date(w.expiration_date)
     updated = _first_date(w.updated_date)
 
-    # Domain age in days (from creation to now)
     age_days: Optional[int] = None
     if created:
-        delta    = datetime.now(timezone.utc) - created
-        age_days = delta.days
+        age_days = (datetime.now(timezone.utc) - created).days
 
-    # Name servers — normalise to list of lowercase strings
     ns = w.name_servers or []
     if isinstance(ns, str):
         ns = [ns]
     name_servers = sorted({n.lower().rstrip(".") for n in ns if n})
 
-    # Registrant country — may be None for privacy-protected domains
     registrant_country = (
         getattr(w, "country", None) or
         getattr(w, "registrant_country", None)
@@ -136,13 +121,55 @@ def _run_whois(domain: str) -> dict:
         "updated":            updated.strftime("%Y-%m-%d") if updated else "",
         "age_days":           age_days,
         "registrant_country": registrant_country or "",
-        "name_servers":       name_servers[:6],   # cap to 6 for storage
+        "name_servers":       name_servers[:6],
         "privacy_protected":  bool(
             "privacy" in str(w.registrar or "").lower() or
             "redacted" in str(getattr(w, "name", "") or "").lower()
         ),
-        "whois_error":        "",
+        "whois_error": "",
     }
+
+
+def _run_whois(domain: str) -> dict:
+    """
+    Run a WHOIS lookup with an 8-second timeout.
+
+    Uses threading instead of signal.SIGALRM so it works on Windows too.
+    Returns partial/empty dict on timeout or any error — never raises.
+    """
+    if not _WHOIS_OK:
+        return {"whois_error": "python-whois not installed"}
+
+    import threading
+
+    result: dict = {}
+    error:  dict = {}
+
+    def _do_whois():
+        try:
+            w = _whois.whois(domain)
+            if not w or not w.domain_name:
+                error["msg"] = "No WHOIS record found"
+                return
+            result.update(_parse_whois_result(w))
+        except Exception as exc:
+            error["msg"] = str(exc)[:120]
+
+    t = threading.Thread(target=_do_whois, daemon=True)
+    t.start()
+    t.join(timeout=_WHOIS_TIMEOUT)
+
+    if t.is_alive():
+        # Thread is still blocked on the socket — timed out
+        return {"whois_error": f"WHOIS timed out after {_WHOIS_TIMEOUT}s"}
+
+    if error:
+        return {"whois_error": error.get("msg", "WHOIS lookup failed")}
+
+    if result:
+        return result
+
+    return {"whois_error": "WHOIS returned no data"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
