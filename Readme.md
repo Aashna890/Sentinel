@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛡️ Sentinel — AI-Powered Email Threat Detection & Forensic Intelligence Platform
+# 🛡️ Sentinel AI-Powered Email Threat Detection & Forensic Intelligence Platform
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)](https://react.dev)
@@ -28,7 +28,6 @@
 - [Google Cloud Setup](#google-cloud-setup)
 - [Environment Variables](#environment-variables)
 - [API Reference](#api-reference)
-- [Screenshots](#screenshots)
 
 ---
 
@@ -140,54 +139,17 @@ Sentinel addresses this gap by providing:
 
 ## ML Pipeline
 
-```
-RAW EMAIL (.eml / pasted text)
-         │
-         ▼
-┌─────────────────────┐
-│   DATA INGESTION    │
-│ Headers + Body      │
-│ URLs + Attachments  │
-└──────────┬──────────┘
-           │
-     ┌─────┴──────┐
-     ▼            ▼
-NLP Features   Header + URL Features
-(keyword       (25-dim structured
- scores)        feature vector)
-     │            │
-     └─────┬──────┘
-           ▼
-┌─────────────────────┐     ┌───────────────────┐     ┌──────────────────┐
-│  TF-IDF + LinearSVC │     │     XGBoost        │     │ Isolation Forest │
-│   (NLP Classifier)  │     │ (Structured Model) │     │ (Anomaly Detect) │
-│      40% weight     │     │    35% weight      │     │   15% weight     │
-└──────────┬──────────┘     └─────────┬──────────┘     └────────┬─────────┘
-           │                          │                          │
-           └──────────────────────────┴──────────────────────────┘
-                                      │
-                             ┌────────▼─────────┐
-                             │ Ensemble Scoring  │
-                             │ + Header Bonus    │
-                             │   (up to +21 pts) │
-                             └────────┬──────────┘
-                                      │
-                             ┌────────▼──────────┐
-                             │  FRAUD SCORE       │
-                             │     0 – 100        │
-                             │                   │
-                             │  < 30  Legitimate  │
-                             │  30-49 Suspicious  │
-                             │  50-69 Phishing    │
-                             │  70-84 Fraud       │
-                             │  85+   Critical    │
-                             └────────┬──────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    ▼                 ▼                  ▼
-             SHAP Values      Graph Correlation    Forensic Report
-           (feature explain)  (NetworkX + DBSCAN)  (Case + Alert)
-```
+<div align="center">
+  <img src="docs/aml_pipeline.png" alt="AML Pipeline – Email Threat Detection & Forensic Analysis" width="700"/>
+</div>
+
+<br/>
+
+The pipeline ingests raw email data (headers, body, attachments/links), runs it through preprocessing and parallel feature extraction (NLP, header, URL), fuses the features, and passes them through an ensemble of three models. The final threat score drives two downstream paths — anomaly/campaign detection via DBSCAN and deep forensic analysis — both feeding the Forensic Dashboard.
+
+<div align="center">
+  <img src="docs/platform_architecture.png" alt="AI-Powered Email Threat Detection, GeoLocation & Forensic Intelligence Platform" width="900"/>
+</div>
 
 ### ML Techniques Used
 
@@ -293,6 +255,10 @@ ForensiMail AI/
 │       ├── enron/
 │       ├── nazario/
 │       └── spamassassin/
+│
+├── docs/
+│   ├── aml_pipeline.png              # AML Pipeline diagram
+│   └── platform_architecture.png    # Full platform architecture diagram
 │
 ├── src/                              # React frontend
 │   ├── api/
@@ -550,19 +516,6 @@ http://localhost:8000/api/auth/google/callback
 
 ---
 
-## Screenshots
-
-| Feature | Description |
-|---|---|
-| **Dashboard** | KPI cards, recent cases, threat distribution pie chart |
-| **Analyze Email** | Paste raw email → full forensic pipeline |
-| **Case Detail** | Complete forensic report with map, domain intel, SHAP |
-| **Graph View** | Interactive force-directed infrastructure correlation graph |
-| **ML Metrics** | Confusion matrices, feature importances, ensemble weights |
-| **Chrome Extension** | Popup with live stats + Gmail threat banner injection |
-
----
-
 ## Built With
 
 - [FastAPI](https://fastapi.tiangolo.com) — Backend framework
@@ -574,5 +527,3 @@ http://localhost:8000/api/auth/google/callback
 - [Google Cloud Pub/Sub](https://cloud.google.com/pubsub) — Real-time push notifications
 
 ---
-
-
